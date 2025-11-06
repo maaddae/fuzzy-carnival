@@ -1,0 +1,7 @@
+# PostgreSQL
+# ------------------------------------------------------------------------------
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=secretshunter
+POSTGRES_USER=YbdkKKiyxZekCyqexzUzbiugGdtkXReJ
+POSTGRES_PASSWORD=1v5PoIo9oYudzoiCnrQRU6Hw1u7bmWYM7swlyUlNDYGDcyo3mEP6jAbzZjMy6JNm
