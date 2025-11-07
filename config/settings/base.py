@@ -356,5 +356,11 @@ SPECTACULAR_SETTINGS = {
 # ------------------------------------------------------------------------------
 GITHUB_TOKEN = env("GITHUB_TOKEN", default=None)
 
+# Scanner Configuration
+SCANNER_SCAN_CACHE_DURATION_HOURS = env.int(
+    "SCANNER_SCAN_CACHE_DURATION_HOURS",
+    default=24,
+)  # Reuse scans within 24 hours by default
+
 # Your stuff...
 # ------------------------------------------------------------------------------

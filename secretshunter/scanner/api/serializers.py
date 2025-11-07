@@ -147,6 +147,127 @@ class RepositoryScanSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class IdempotentRepositoryScanSerializer(RepositoryScanSerializer):
+    """Serializer for idempotent repository scans.
+
+    Extends RepositoryScanSerializer with idempotency logic:
+    1. Fetches latest commit SHA from GitHub
+    2. Checks for existing scan with same SHA (true idempotency)
+    3. Checks for in-progress scans (prevents duplicates)
+    4. Only creates new scan if none of the above exist
+
+    Query Parameters:
+        force_rescan (bool): If true, bypass idempotency checks and create new scan.
+
+    """
+
+    # Additional fields to display reuse information
+    reused = serializers.SerializerMethodField()
+    reused_reason = serializers.SerializerMethodField()
+    commit_sha = serializers.CharField(read_only=True)
+    commit_date = serializers.DateTimeField(read_only=True)
+
+    class Meta(RepositoryScanSerializer.Meta):
+        fields = [
+            *RepositoryScanSerializer.Meta.fields,
+            "commit_sha",
+            "commit_date",
+            "reused",
+            "reused_reason",
+        ]
+        read_only_fields = [
+            *RepositoryScanSerializer.Meta.read_only_fields,
+            "commit_sha",
+            "commit_date",
+            "reused",
+            "reused_reason",
+        ]
+
+    def get_reused(self, obj):
+        """Check if this scan was reused."""
+        return getattr(obj, "_reused", False)
+
+    def get_reused_reason(self, obj):
+        """Get the reason why scan was reused."""
+        return getattr(obj, "_reused_reason", None)
+
+    def create(self, validated_data: dict) -> RepositoryScan:
+        """Create or reuse a RepositoryScan with idempotency checks.
+
+        Args:
+            validated_data: Validated data from request.
+
+        Returns:
+            RepositoryScan instance (new or existing).
+
+        """
+        # Parse the repository URL to extract owner and repo
+        client = GitHubClient()
+        owner, repo = client.parse_repo_url(validated_data["repository_url"])
+
+        # Check for force_rescan parameter
+        request = self.context.get("request")
+        force_rescan = False
+
+        if request:
+            force_rescan = (
+                request.query_params.get("force_rescan", "false").lower() == "true"
+            )
+
+        # Fetch latest commit SHA
+        commit_sha = None
+        commit_date = None
+        try:
+            result = client.get_latest_commit_sha(owner, repo)
+            if result:
+                commit_sha, commit_date = result
+        except GitHubClientError:
+            # Continue without commit SHA if fetch fails
+            pass
+
+        # Check for existing scan (unless force_rescan)
+        if not force_rescan:
+            existing_scan = RepositoryScan.get_existing_scan(
+                repository_owner=owner,
+                repository_name=repo,
+                commit_sha=commit_sha,
+            )
+
+            if existing_scan:
+                # Mark as reused for response
+                existing_scan._reused = True  # noqa: SLF001
+
+                # Determine reason
+                if commit_sha and existing_scan.commit_sha == commit_sha:
+                    existing_scan._reused_reason = (  # noqa: SLF001
+                        "Exact commit SHA match - repository unchanged"
+                    )
+                elif existing_scan.scan_status in [
+                    RepositoryScan.ScanStatus.PENDING,
+                    RepositoryScan.ScanStatus.IN_PROGRESS,
+                ]:
+                    existing_scan._reused_reason = "Scan already in progress"  # noqa: SLF001
+                else:
+                    existing_scan._reused_reason = (  # noqa: SLF001
+                        f"Recent scan found (completed {existing_scan.completed_at})"
+                    )
+
+                return existing_scan
+
+        # Add commit tracking data
+        validated_data["commit_sha"] = commit_sha or ""
+        validated_data["commit_date"] = commit_date
+
+        # Call parent's create method (handles owner/repo/created_by)
+        scan = super().create(validated_data)
+
+        # Mark as new scan (not reused)
+        scan._reused = False  # noqa: SLF001
+        scan._reused_reason = None  # noqa: SLF001
+
+        return scan
+
+
 class RepositoryScanListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for listing scans (without findings)."""
 

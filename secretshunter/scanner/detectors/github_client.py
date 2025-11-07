@@ -242,3 +242,75 @@ class GitHubClient:
         except requests.RequestException as exc:
             logger.warning("Failed to check rate limit: %s", exc)
             return {}
+
+    def get_latest_commit_sha(
+        self,
+        owner: str,
+        repo: str,
+        branch: str = "main",
+    ) -> tuple[str, str] | None:
+        """Get the latest commit SHA for a repository branch.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            branch: Branch name (default: main).
+
+        Returns:
+            Tuple of (commit_sha, commit_date) or None if error.
+
+        Raises:
+            RepositoryNotFoundError: If repository is not found.
+            RateLimitError: If rate limit is exceeded.
+            GitHubClientError: For other API errors.
+
+        """
+        # Try main first, then master if main fails
+        branches_to_try = [branch]
+        if branch == "main":
+            branches_to_try.append("master")
+
+        for branch_name in branches_to_try:
+            try:
+                url = f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{branch_name}"
+                response = self.session.get(url, timeout=10)
+
+                if response.status_code == 404:  # noqa: PLR2004
+                    continue
+
+                if response.status_code == 403:  # noqa: PLR2004
+                    if "rate limit" in response.text.lower():
+                        msg = "GitHub API rate limit exceeded"
+                        raise RateLimitError(msg)
+                    msg = f"Access forbidden: {response.text}"
+                    raise GitHubClientError(msg)
+
+                response.raise_for_status()
+
+                data = response.json()
+                commit_sha = data.get("sha")
+                commit_date = data.get("commit", {}).get("author", {}).get("date")
+
+                if commit_sha:
+                    logger.info(
+                        "Retrieved commit SHA for %s/%s: %s",
+                        owner,
+                        repo,
+                        commit_sha[:7],
+                    )
+                    return commit_sha, commit_date
+
+            except requests.RequestException as exc:
+                if "404" not in str(exc):
+                    logger.warning(
+                        "Failed to fetch commit SHA for %s/%s: %s",
+                        owner,
+                        repo,
+                        exc,
+                    )
+                    msg = f"Failed to fetch commit information: {exc}"
+                    raise GitHubClientError(msg) from exc
+
+        # If we tried all branches and none worked
+        msg = f"Repository not found: {owner}/{repo}"
+        raise RepositoryNotFoundError(msg)

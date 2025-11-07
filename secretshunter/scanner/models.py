@@ -41,12 +41,30 @@ class RepositoryScan(models.Model):
     secrets_found_count = models.IntegerField(_("Secrets Found"), default=0)
     error_message = models.TextField(_("Error Message"), blank=True)
 
+    # Commit tracking for idempotency
+    commit_sha = models.CharField(
+        _("Commit SHA"),
+        max_length=40,
+        blank=True,
+        db_index=True,
+        help_text=_("Git commit SHA that was scanned"),
+    )
+    commit_date = models.DateTimeField(
+        _("Commit Date"),
+        null=True,
+        blank=True,
+        help_text=_("Date of the commit that was scanned"),
+    )
+
     class Meta:
         verbose_name = _("Repository Scan")
         verbose_name_plural = _("Repository Scans")
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["-created_at", "scan_status"]),
+            models.Index(
+                fields=["repository_owner", "repository_name", "commit_sha"],
+            ),
         ]
 
     def __str__(self):
@@ -56,6 +74,50 @@ class RepositoryScan(models.Model):
     def repository_full_name(self):
         """Return the full repository name (owner/repo)."""
         return f"{self.repository_owner}/{self.repository_name}"
+
+    @classmethod
+    def get_existing_scan(
+        cls,
+        repository_owner: str,
+        repository_name: str,
+        commit_sha: str | None = None,
+    ):
+        """Find existing scan for idempotency.
+
+        Checks in priority order:
+        1. Exact commit SHA match (if provided)
+        2. In-progress scans (PENDING or IN_PROGRESS)
+
+        Args:
+            repository_owner: Repository owner name.
+            repository_name: Repository name.
+            commit_sha: Git commit SHA (optional).
+
+        Returns:
+            Existing RepositoryScan instance or None.
+
+        """
+        # Priority 1: Exact commit SHA match (true idempotency)
+        if commit_sha:
+            sha_match = (
+                cls.objects.filter(
+                    repository_owner=repository_owner,
+                    repository_name=repository_name,
+                    commit_sha=commit_sha,
+                    scan_status=cls.ScanStatus.COMPLETED,
+                )
+                .order_by("-completed_at")
+                .first()
+            )
+            if sha_match:
+                return sha_match
+
+        # Priority 2: In-progress scans (prevent duplicates)
+        return cls.objects.filter(
+            repository_owner=repository_owner,
+            repository_name=repository_name,
+            scan_status__in=[cls.ScanStatus.PENDING, cls.ScanStatus.IN_PROGRESS],
+        ).first()
 
 
 class SecretFinding(models.Model):
