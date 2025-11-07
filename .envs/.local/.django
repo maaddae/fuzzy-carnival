@@ -14,4 +14,11 @@ CELERY_FLOWER_USER=jdzvJGfCybkmtrNHrtQOfkZedhwZhzKa
 CELERY_FLOWER_PASSWORD=pYDN7sR6zogI4qZf5C1qXnu1G4E9ZephCveEZ78mvGYFmZzjYY7ApDfukqFFG18G
 
 # Django
+# ------------------------------------------------------------------------------
 DATABASE_URL=psql://YbdkKKiyxZekCyqexzUzbiugGdtkXReJ:1v5PoIo9oYudzoiCnrQRU6Hw1u7bmWYM7swlyUlNDYGDcyo3mEP6jAbzZjMy6JNm@postgres:5432/secretshunter
+
+# GitHub Scanner
+# ------------------------------------------------------------------------------
+# Optional: Add your GitHub Personal Access Token for higher rate limits
+# Get one at: https://github.com/settings/tokens
+# GITHUB_TOKEN=your_github_token_here

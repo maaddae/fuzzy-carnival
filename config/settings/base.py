@@ -351,5 +351,10 @@ SPECTACULAR_SETTINGS = {
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
 }
+
+# GitHub Scanner Settings
+# ------------------------------------------------------------------------------
+GITHUB_TOKEN = env("GITHUB_TOKEN", default=None)
+
 # Your stuff...
 # ------------------------------------------------------------------------------
