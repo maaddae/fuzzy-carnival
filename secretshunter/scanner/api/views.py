@@ -1,5 +1,6 @@
 """API views for scanner app."""
 
+from django.db import transaction
 from rest_framework import mixins
 from rest_framework import status
 from rest_framework import viewsets
@@ -11,6 +12,7 @@ from secretshunter.scanner.models import RepositoryScan
 from secretshunter.scanner.models import SecretFinding
 from secretshunter.scanner.tasks import scan_repository_task
 
+from .serializers import IdempotentRepositoryScanSerializer
 from .serializers import RepositoryScanListSerializer
 from .serializers import RepositoryScanSerializer
 from .serializers import SecretFindingSerializer
@@ -46,6 +48,8 @@ class RepositoryScanViewSet(
         """
         if self.action == "list":
             return RepositoryScanListSerializer
+        if self.action == "create_idempotent":
+            return IdempotentRepositoryScanSerializer
         return RepositoryScanSerializer
 
     def get_queryset(self):
@@ -73,8 +77,10 @@ class RepositoryScanViewSet(
         # Save the scan
         scan = serializer.save()
 
-        # Trigger async Celery task
-        scan_repository_task.delay(scan.id)
+        # Trigger async Celery task after transaction commits
+        # This ensures the scan exists in the database before the worker
+        # tries to fetch it
+        transaction.on_commit(lambda: scan_repository_task.delay(scan.id))
 
     def create(self, request, *args, **kwargs):
         """Create a new scan and return immediately.
@@ -102,6 +108,84 @@ class RepositoryScanViewSet(
                 ),
             },
             status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="idempotent",
+        serializer_class=IdempotentRepositoryScanSerializer,
+    )
+    def create_idempotent(self, request):
+        """Create or reuse a scan with idempotency checks.
+
+        This endpoint implements smart idempotency:
+        1. Fetches latest commit SHA from GitHub
+        2. Returns existing scan if commit SHA matches (true idempotency)
+        3. Returns in-progress scan if one exists
+        4. Creates new scan only if none of above conditions met
+
+        Query Parameters:
+            force_rescan (bool): Bypass idempotency checks and create new scan.
+
+        Request Body:
+            repository_url (str): GitHub repository URL to scan.
+
+        Returns:
+            Response with scan details and reuse information.
+
+        Example:
+            POST /api/scans/idempotent/
+            {
+                "repository_url": "https://github.com/owner/repo"
+            }
+
+            Response:
+            {
+                "id": 123,
+                "repository_url": "https://github.com/owner/repo",
+                "commit_sha": "abc123...",
+                "scan_status": "completed",
+                "reused": true,
+                "reused_reason": "Exact commit SHA match - repository unchanged",
+                ...
+            }
+
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Save (creates new or returns existing)
+        scan = serializer.save()
+
+        # Check if scan was reused
+        reused = getattr(scan, "_reused", False)
+
+        # Only trigger Celery task if it's a new scan
+        # Use transaction.on_commit to ensure scan is committed before worker fetches it
+        if not reused:
+            transaction.on_commit(lambda: scan_repository_task.delay(scan.id))
+
+        headers = self.get_success_headers(serializer.data)
+
+        # Prepare response message
+        if reused:
+            reused_reason = getattr(scan, "_reused_reason", "Existing scan found")
+            message = f"Reusing existing scan: {reused_reason}"
+            response_status = status.HTTP_200_OK
+        else:
+            message = (
+                "New scan initiated successfully. Check status using the provided ID."
+            )
+            response_status = status.HTTP_201_CREATED
+
+        return Response(
+            {
+                **serializer.data,
+                "message": message,
+            },
+            status=response_status,
             headers=headers,
         )
 
