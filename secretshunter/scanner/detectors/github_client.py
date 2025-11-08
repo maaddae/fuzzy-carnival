@@ -314,3 +314,119 @@ class GitHubClient:
         # If we tried all branches and none worked
         msg = f"Repository not found: {owner}/{repo}"
         raise RepositoryNotFoundError(msg)
+
+    def create_issue(
+        self,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a GitHub issue in the repository.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            title: Issue title.
+            body: Issue body/description.
+            labels: List of label names to apply (optional).
+
+        Returns:
+            Dictionary with issue details (number, url, etc).
+
+        Raises:
+            GitHubClientError: If issue creation fails.
+            RateLimitError: If rate limit is exceeded.
+
+        """
+        if not self.token:
+            msg = "GitHub token required to create issues"
+            raise GitHubClientError(msg)
+
+        try:
+            url = f"{self.BASE_URL}/repos/{owner}/{repo}/issues"
+            payload = {
+                "title": title,
+                "body": body,
+            }
+
+            if labels:
+                payload["labels"] = labels
+
+            response = self.session.post(url, json=payload, timeout=30)
+
+            if response.status_code == 403:  # noqa: PLR2004
+                if "rate limit" in response.text.lower():
+                    msg = "GitHub API rate limit exceeded"
+                    raise RateLimitError(msg)
+                msg = f"Access forbidden: {response.text}"
+                raise GitHubClientError(msg)
+
+            if response.status_code == 410:  # noqa: PLR2004
+                msg = "Issues are disabled for this repository"
+                raise GitHubClientError(msg)
+
+            if response.status_code == 404:  # noqa: PLR2004
+                msg = f"Repository not found: {owner}/{repo}"
+                raise RepositoryNotFoundError(msg)
+
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(
+                "Created issue #%s in %s/%s: %s",
+                data.get("number"),
+                owner,
+                repo,
+                title,
+            )
+
+            return {
+                "number": data.get("number"),
+                "url": data.get("html_url"),
+                "api_url": data.get("url"),
+                "state": data.get("state"),
+                "title": data.get("title"),
+            }
+
+        except requests.RequestException as exc:
+            logger.warning(
+                "Failed to create issue in %s/%s: %s",
+                owner,
+                repo,
+                exc,
+            )
+            msg = f"Failed to create issue: {exc}"
+            raise GitHubClientError(msg) from exc
+
+    def check_issues_enabled(self, owner: str, repo: str) -> bool:
+        """Check if issues are enabled for a repository.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+
+        Returns:
+            True if issues are enabled, False otherwise.
+
+        """
+        try:
+            url = f"{self.BASE_URL}/repos/{owner}/{repo}"
+            response = self.session.get(url, timeout=10)
+
+            if response.status_code == 404:  # noqa: PLR2004
+                return False
+
+            response.raise_for_status()
+            data = response.json()
+            return data.get("has_issues", False)
+
+        except requests.RequestException as exc:
+            logger.warning(
+                "Failed to check issues status for %s/%s: %s",
+                owner,
+                repo,
+                exc,
+            )
+            return False
