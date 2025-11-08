@@ -1,11 +1,15 @@
 """API serializers for scanner app."""
 
+import logging
+
 from rest_framework import serializers
 
 from secretshunter.scanner.detectors.github_client import GitHubClient
 from secretshunter.scanner.detectors.github_client import GitHubClientError
 from secretshunter.scanner.models import RepositoryScan
 from secretshunter.scanner.models import SecretFinding
+
+logger = logging.getLogger(__name__)
 
 
 class SecretFindingSerializer(serializers.ModelSerializer):
@@ -205,6 +209,12 @@ class IdempotentRepositoryScanSerializer(RepositoryScanSerializer):
         client = GitHubClient()
         owner, repo = client.parse_repo_url(validated_data["repository_url"])
 
+        logger.info(
+            "Idempotent scan request for %s/%s",
+            owner,
+            repo,
+        )
+
         # Check for force_rescan parameter
         request = self.context.get("request")
         force_rescan = False
@@ -214,6 +224,9 @@ class IdempotentRepositoryScanSerializer(RepositoryScanSerializer):
                 request.query_params.get("force_rescan", "false").lower() == "true"
             )
 
+        if force_rescan:
+            logger.info("Force rescan requested, bypassing idempotency checks")
+
         # Fetch latest commit SHA
         commit_sha = None
         commit_date = None
@@ -221,9 +234,29 @@ class IdempotentRepositoryScanSerializer(RepositoryScanSerializer):
             result = client.get_latest_commit_sha(owner, repo)
             if result:
                 commit_sha, commit_date = result
-        except GitHubClientError:
+                logger.info(
+                    "Fetched commit SHA: %s (date: %s)",
+                    commit_sha[:7] if commit_sha else None,
+                    commit_date,
+                )
+            else:
+                logger.warning("get_latest_commit_sha returned None")
+        except GitHubClientError as exc:
             # Continue without commit SHA if fetch fails
-            pass
+            logger.warning(
+                "Failed to fetch commit SHA for %s/%s: %s",
+                owner,
+                repo,
+                exc,
+            )
+        except Exception as exc:
+            # Catch any other exceptions
+            logger.exception(
+                "Unexpected error fetching commit SHA for %s/%s: %s",
+                owner,
+                repo,
+                type(exc).__name__,
+            )
 
         # Check for existing scan (unless force_rescan)
         if not force_rescan:
@@ -242,21 +275,46 @@ class IdempotentRepositoryScanSerializer(RepositoryScanSerializer):
                     existing_scan._reused_reason = (  # noqa: SLF001
                         "Exact commit SHA match - repository unchanged"
                     )
+                    logger.info(
+                        "Reusing scan #%s: exact commit SHA match",
+                        existing_scan.id,
+                    )
                 elif existing_scan.scan_status in [
                     RepositoryScan.ScanStatus.PENDING,
                     RepositoryScan.ScanStatus.IN_PROGRESS,
                 ]:
                     existing_scan._reused_reason = "Scan already in progress"  # noqa: SLF001
+                    logger.info(
+                        "Reusing scan #%s: scan in progress",
+                        existing_scan.id,
+                    )
                 else:
                     existing_scan._reused_reason = (  # noqa: SLF001
                         f"Recent scan found (completed {existing_scan.completed_at})"
                     )
+                    logger.info(
+                        "Reusing scan #%s: recent scan found",
+                        existing_scan.id,
+                    )
 
                 return existing_scan
+            logger.info(
+                "No existing scan found for %s/%s with commit SHA %s",
+                owner,
+                repo,
+                commit_sha[:7] if commit_sha else None,
+            )
 
         # Add commit tracking data
         validated_data["commit_sha"] = commit_sha or ""
         validated_data["commit_date"] = commit_date
+
+        logger.info(
+            "Creating new scan for %s/%s with commit SHA: %s",
+            owner,
+            repo,
+            commit_sha[:7] if commit_sha else "None",
+        )
 
         # Call parent's create method (handles owner/repo/created_by)
         scan = super().create(validated_data)

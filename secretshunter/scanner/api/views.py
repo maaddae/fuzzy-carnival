@@ -1,5 +1,6 @@
 """API views for scanner app."""
 
+from django.db import transaction
 from rest_framework import mixins
 from rest_framework import status
 from rest_framework import viewsets
@@ -47,6 +48,8 @@ class RepositoryScanViewSet(
         """
         if self.action == "list":
             return RepositoryScanListSerializer
+        if self.action == "create_idempotent":
+            return IdempotentRepositoryScanSerializer
         return RepositoryScanSerializer
 
     def get_queryset(self):
@@ -74,8 +77,10 @@ class RepositoryScanViewSet(
         # Save the scan
         scan = serializer.save()
 
-        # Trigger async Celery task
-        scan_repository_task.delay(scan.id)
+        # Trigger async Celery task after transaction commits
+        # This ensures the scan exists in the database before the worker
+        # tries to fetch it
+        transaction.on_commit(lambda: scan_repository_task.delay(scan.id))
 
     def create(self, request, *args, **kwargs):
         """Create a new scan and return immediately.
@@ -158,8 +163,9 @@ class RepositoryScanViewSet(
         reused = getattr(scan, "_reused", False)
 
         # Only trigger Celery task if it's a new scan
+        # Use transaction.on_commit to ensure scan is committed before worker fetches it
         if not reused:
-            scan_repository_task.delay(scan.id)
+            transaction.on_commit(lambda: scan_repository_task.delay(scan.id))
 
         headers = self.get_success_headers(serializer.data)
 
