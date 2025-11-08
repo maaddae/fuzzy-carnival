@@ -87,6 +87,7 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "secretshunter.users",
+    "secretshunter.scanner",
     # Your stuff: custom apps go here
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
@@ -350,5 +351,10 @@ SPECTACULAR_SETTINGS = {
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
 }
+
+# GitHub Scanner Settings
+# ------------------------------------------------------------------------------
+GITHUB_TOKEN = env("GITHUB_TOKEN", default=None)
+
 # Your stuff...
 # ------------------------------------------------------------------------------
