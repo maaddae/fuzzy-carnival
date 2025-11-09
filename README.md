@@ -52,6 +52,7 @@ SecretsHunter is a security scanning tool that analyzes public GitHub repositori
 
 ### API Endpoints
 
+#### Scanning
 - `POST /api/scans/` - Scan a GitHub repository for secrets
 - `POST /api/scans/idempotent/` - Smart scanning with commit SHA deduplication
 - `GET /api/scans/` - List all scans
@@ -59,9 +60,18 @@ SecretsHunter is a security scanning tool that analyzes public GitHub repositori
 - `POST /api/scans/{id}/create-issue/` - Create a GitHub issue for scan findings
 - `PATCH /api/scans/{id}/mark_false_positive/` - Mark findings as false positives
 
+#### Watchlist
+- `POST /api/watchlist/` - Add repository to watchlist
+- `GET /api/watchlist/` - List watched repositories
+- `GET /api/watchlist/{id}/` - Get watchlist entry details
+- `PATCH /api/watchlist/{id}/` - Update scan interval or active status
+- `DELETE /api/watchlist/{id}/` - Remove repository from watchlist
+- `POST /api/watchlist/{id}/scan_now/` - Trigger immediate scan
+
 ### Features
 
 - Asynchronous scanning with Celery
+- **Repository watchlist with periodic scanning** at configurable intervals
 - Idempotent scans using commit SHA tracking
 - 13+ secret detection patterns
 - Context preservation for findings
@@ -98,6 +108,54 @@ When enabled:
 
 You can also manually trigger issue creation via the API:
 ```bash
+curl -X POST "http://localhost:8000/api/scans/{scan_id}/create-issue/" \
+  -H "Authorization: Token your_api_token"
+```
+
+### Repository Watchlist
+
+Add repositories to a watchlist for automatic periodic scanning:
+
+```bash
+# Add a repository to the watchlist
+curl -X POST http://localhost:8000/api/watchlist/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository_url": "https://github.com/owner/repo",
+    "scan_interval": 86400
+  }'
+```
+
+**Available scan intervals:**
+- `3600` - Every Hour
+- `21600` - Every 6 Hours
+- `86400` - Daily (default)
+- `604800` - Weekly
+
+**Watchlist features:**
+- Automatic periodic scanning at configured intervals
+- Track scan history and statistics
+- Enable/disable monitoring without removing entries
+- Manual scan trigger via API
+- Next scan scheduling
+
+**Trigger immediate scan:**
+```bash
+curl -X POST http://localhost:8000/api/watchlist/{id}/scan_now/
+```
+
+**List watched repositories:**
+```bash
+curl http://localhost:8000/api/watchlist/
+```
+
+**Update scan interval:**
+```bash
+curl -X PATCH http://localhost:8000/api/watchlist/{id}/ \
+  -H "Content-Type: application/json" \
+  -d '{"scan_interval": 3600, "is_active": true}'
+```
+
 curl -X POST "http://localhost:8000/api/scans/{scan_id}/create-issue/" \
   -H "Authorization: Token your_api_token"
 ```

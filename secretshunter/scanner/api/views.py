@@ -12,6 +12,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from secretshunter.scanner.models import RepositoryScan
+from secretshunter.scanner.models import RepositoryWatchlist
 from secretshunter.scanner.models import SecretFinding
 from secretshunter.scanner.services import IssueCreationError
 from secretshunter.scanner.services import create_github_issue_for_scan
@@ -20,6 +21,7 @@ from secretshunter.scanner.tasks import scan_repository_task
 from .serializers import IdempotentRepositoryScanSerializer
 from .serializers import RepositoryScanListSerializer
 from .serializers import RepositoryScanSerializer
+from .serializers import RepositoryWatchlistSerializer
 from .serializers import SecretFindingSerializer
 from .serializers import SecretFindingUpdateSerializer
 
@@ -445,3 +447,84 @@ class SecretFindingViewSet(
             queryset = queryset.filter(scan_id=scan_id)
 
         return queryset
+
+
+class RepositoryWatchlistViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing repository watchlist.
+
+    Supports:
+    - POST /api/watchlist/ - Add repository to watchlist
+    - GET /api/watchlist/ - List watched repositories
+    - GET /api/watchlist/{id}/ - Get watchlist entry details
+    - PATCH /api/watchlist/{id}/ - Update watchlist entry (interval, active status)
+    - DELETE /api/watchlist/{id}/ - Remove repository from watchlist
+    - POST /api/watchlist/{id}/scan_now/ - Trigger immediate scan
+
+    """
+
+    queryset = RepositoryWatchlist.objects.all().select_related(
+        "added_by",
+        "last_scan",
+    )
+    serializer_class = RepositoryWatchlistSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        """Filter queryset based on query parameters."""
+        queryset = super().get_queryset()
+
+        # Filter by active status
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+        # Filter by repository owner
+        owner = self.request.query_params.get("owner")
+        if owner:
+            queryset = queryset.filter(repository_owner__iexact=owner)
+
+        return queryset
+
+    @action(detail=True, methods=["post"])
+    def scan_now(self, request, pk=None):
+        """Trigger an immediate scan for a watchlisted repository."""
+        watchlist_entry = self.get_object()
+
+        if not watchlist_entry.is_active:
+            return Response(
+                {
+                    "success": False,
+                    "error": "This watchlist entry is not active",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create a new scan
+        scan = RepositoryScan.objects.create(
+            repository_url=watchlist_entry.repository_url,
+            repository_owner=watchlist_entry.repository_owner,
+            repository_name=watchlist_entry.repository_name,
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        # Link scan to watchlist entry
+        watchlist_entry.last_scan = scan
+        watchlist_entry.save(update_fields=["last_scan"])
+
+        # Trigger scan task
+        transaction.on_commit(lambda: scan_repository_task.delay(scan.id))
+
+        logger.info(
+            "Manual scan triggered for watchlist entry %s: scan %s",
+            watchlist_entry.id,
+            scan.id,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "scan_id": scan.id,
+                "message": f"Scan initiated for {watchlist_entry.repository_full_name}",
+            },
+            status=status.HTTP_201_CREATED,
+        )

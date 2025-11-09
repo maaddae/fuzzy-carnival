@@ -3,6 +3,7 @@
 import logging
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -12,6 +13,7 @@ from .detectors.github_client import GitHubClient
 from .detectors.github_client import GitHubClientError
 from .detectors.scanner import SecretScanner
 from .models import RepositoryScan
+from .models import RepositoryWatchlist
 from .models import SecretFinding
 from .services import IssueCreationError
 from .services import create_github_issue_for_scan
@@ -89,6 +91,23 @@ def _schedule_issue_creation(scan_id: int, matches_count: int) -> None:
     )
 
 
+def _update_watchlist_after_scan(scan: RepositoryScan) -> None:
+    """Update watchlist entry statistics after scan completion."""
+    watchlist_entries = RepositoryWatchlist.objects.filter(
+        repository_url=scan.repository_url,
+        last_scan=scan,
+    )
+
+    for entry in watchlist_entries:
+        entry.last_secrets_found = scan.secrets_found_count
+        entry.save(update_fields=["last_secrets_found"])
+        logger.info(
+            "Updated watchlist entry %s: %s secrets found",
+            entry.id,
+            scan.secrets_found_count,
+        )
+
+
 def _perform_repository_scan(scan: RepositoryScan) -> tuple[list, int]:
     """Execute the actual repository scan and return results."""
     github_client = GitHubClient()
@@ -140,6 +159,9 @@ def scan_repository_task(self, scan_id: int) -> dict:
             len(matches),
             files_scanned,
         )
+
+        # Update watchlist statistics if this scan is linked to a watchlist
+        _update_watchlist_after_scan(scan)
 
         # Auto-create GitHub issue if configured
         if _should_auto_create_issue(matches):
@@ -332,3 +354,84 @@ def create_github_issue_task(self, scan_id: int) -> dict:
         return {"scan_id": scan_id, "status": "failed", "error": error_msg}
     else:
         return result
+
+
+@shared_task(name="scanner.scan_watchlist_repositories")
+def scan_watchlist_repositories_task() -> dict:
+    """Periodic task to scan repositories from the watchlist.
+
+    This task runs at configured intervals and scans repositories
+    that are due for scanning based on their next_scan_at timestamp.
+
+    Returns:
+        Dictionary with scan statistics.
+
+    """
+    now = datetime.now(tz=UTC)
+
+    # Find active watchlist entries that need scanning
+    due_entries = RepositoryWatchlist.objects.filter(
+        is_active=True,
+        next_scan_at__lte=now,
+    ).select_related("last_scan")
+
+    scans_triggered = 0
+    errors = []
+
+    for entry in due_entries:
+        try:
+            logger.info(
+                "Triggering scheduled scan for watchlist entry %s: %s",
+                entry.id,
+                entry.repository_full_name,
+            )
+
+            # Create a new scan
+            scan = RepositoryScan.objects.create(
+                repository_url=entry.repository_url,
+                repository_owner=entry.repository_owner,
+                repository_name=entry.repository_name,
+                created_by=entry.added_by,
+            )
+
+            # Trigger scan task
+            transaction.on_commit(lambda sid=scan.id: scan_repository_task.delay(sid))
+
+            # Update watchlist entry
+            entry.last_scanned_at = now
+            entry.next_scan_at = now + timedelta(seconds=entry.scan_interval)
+            entry.last_scan = scan
+            entry.total_scans += 1
+            entry.save(
+                update_fields=[
+                    "last_scanned_at",
+                    "next_scan_at",
+                    "last_scan",
+                    "total_scans",
+                ],
+            )
+
+            scans_triggered += 1
+            logger.info(
+                "Scan %s triggered for %s. Next scan at %s",
+                scan.id,
+                entry.repository_full_name,
+                entry.next_scan_at,
+            )
+
+        except Exception as exc:
+            error_msg = f"Error scanning {entry.repository_full_name}: {exc}"
+            logger.exception(error_msg)
+            errors.append(error_msg)
+
+    logger.info(
+        "Watchlist scan task completed. Triggered: %s, Errors: %s",
+        scans_triggered,
+        len(errors),
+    )
+
+    return {
+        "scans_triggered": scans_triggered,
+        "errors": errors,
+        "timestamp": now.isoformat(),
+    }
