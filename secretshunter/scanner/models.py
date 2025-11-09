@@ -56,6 +56,25 @@ class RepositoryScan(models.Model):
         help_text=_("Date of the commit that was scanned"),
     )
 
+    # GitHub issue tracking
+    github_issue_number = models.IntegerField(
+        _("GitHub Issue Number"),
+        null=True,
+        blank=True,
+        help_text=_("GitHub issue number if findings were reported"),
+    )
+    github_issue_url = models.URLField(
+        _("GitHub Issue URL"),
+        max_length=500,
+        blank=True,
+        help_text=_("URL to the GitHub issue created for this scan"),
+    )
+    issue_created_at = models.DateTimeField(
+        _("Issue Created At"),
+        null=True,
+        blank=True,
+    )
+
     class Meta:
         verbose_name = _("Repository Scan")
         verbose_name_plural = _("Repository Scans")

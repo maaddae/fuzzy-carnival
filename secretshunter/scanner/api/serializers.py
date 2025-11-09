@@ -83,6 +83,11 @@ class RepositoryScanSerializer(serializers.ModelSerializer):
             "total_files_scanned",
             "secrets_found_count",
             "error_message",
+            "commit_sha",
+            "commit_date",
+            "github_issue_number",
+            "github_issue_url",
+            "issue_created_at",
             "findings",
         ]
         read_only_fields = [
@@ -96,6 +101,11 @@ class RepositoryScanSerializer(serializers.ModelSerializer):
             "total_files_scanned",
             "secrets_found_count",
             "error_message",
+            "commit_sha",
+            "commit_date",
+            "github_issue_number",
+            "github_issue_url",
+            "issue_created_at",
             "findings",
         ]
 

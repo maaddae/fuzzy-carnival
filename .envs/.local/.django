@@ -21,4 +21,15 @@ DATABASE_URL=psql://YbdkKKiyxZekCyqexzUzbiugGdtkXReJ:1v5PoIo9oYudzoiCnrQRU6Hw1u7
 # ------------------------------------------------------------------------------
 # Optional: Add your GitHub Personal Access Token for higher rate limits
 # Get one at: https://github.com/settings/tokens
-# GITHUB_TOKEN=your_github_token_here
+GITHUB_TOKEN=your_github_token_here
+
+# Auto-create GitHub issues for scan findings
+# Set to False to prevent automatically create issues after scan completion
+AUTO_CREATE_GITHUB_ISSUES=False
+
+# Minimum number of findings required to trigger auto-creation (default: 1)
+AUTO_CREATE_ISSUE_THRESHOLD=1
+
+# Delay in seconds before creating issue after scan completes (default: 5)
+# This allows time for any post-scan processing
+AUTO_CREATE_ISSUE_DELAY=5
