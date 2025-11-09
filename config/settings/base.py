@@ -347,7 +347,7 @@ CORS_URLS_REGEX = r"^/api/.*$"
 SPECTACULAR_SETTINGS = {
     "TITLE": "Secretshunter API",
     "DESCRIPTION": "Documentation of API endpoints of Secretshunter",
-    "VERSION": "1.0.0",
+    "VERSION": "0.3.0",
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
 }
@@ -355,6 +355,15 @@ SPECTACULAR_SETTINGS = {
 # GitHub Scanner Settings
 # ------------------------------------------------------------------------------
 GITHUB_TOKEN = env("GITHUB_TOKEN", default=None)
+
+# Auto-create GitHub issues for scans with findings
+AUTO_CREATE_GITHUB_ISSUES = env.bool("AUTO_CREATE_GITHUB_ISSUES", default=False)
+
+# Minimum number of secrets required to auto-create an issue
+AUTO_CREATE_ISSUE_THRESHOLD = env.int("AUTO_CREATE_ISSUE_THRESHOLD", default=1)
+
+# Delay (in seconds) before creating issue after scan completion
+AUTO_CREATE_ISSUE_DELAY = env.int("AUTO_CREATE_ISSUE_DELAY", default=5)
 
 # Your stuff...
 # ------------------------------------------------------------------------------

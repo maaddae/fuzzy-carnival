@@ -67,6 +67,37 @@ SecretsHunter is a security scanning tool that analyzes public GitHub repositori
 - Context preservation for findings
 - File filtering (binaries, dependencies, build artifacts)
 - GitHub API rate limit handling
-- GitHub issue creation for findings
+- **Automatic GitHub issue creation** for findings (configurable)
+- Manual issue creation via API endpoint
 - False positive management
 - Real-time scan status tracking
+
+## Configuration
+
+### Auto-Creating GitHub Issues
+
+SecretsHunter can automatically create GitHub issues when secrets are found. Configure in `.envs/.local/.django`:
+
+```bash
+# Disable automatic issue creation after scan completion
+AUTO_CREATE_GITHUB_ISSUES=False
+
+# Minimum findings required to create an issue (default: 1)
+AUTO_CREATE_ISSUE_THRESHOLD=1
+
+# Delay in seconds before creating issue (default: 5)
+AUTO_CREATE_ISSUE_DELAY=5
+```
+
+When enabled:
+- Issues are created automatically after scan completion
+- Only created if findings meet the threshold
+- Respects repository permissions (issues must be enabled)
+- Includes detailed Markdown report of all findings
+- Labeled as "security" for easy filtering
+
+You can also manually trigger issue creation via the API:
+```bash
+curl -X POST "http://localhost:8000/api/scans/{scan_id}/create-issue/" \
+  -H "Authorization: Token your_api_token"
+```
