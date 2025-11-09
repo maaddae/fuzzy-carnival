@@ -7,6 +7,7 @@ from rest_framework import serializers
 from secretshunter.scanner.detectors.github_client import GitHubClient
 from secretshunter.scanner.detectors.github_client import GitHubClientError
 from secretshunter.scanner.models import RepositoryScan
+from secretshunter.scanner.models import RepositoryWatchlist
 from secretshunter.scanner.models import SecretFinding
 
 logger = logging.getLogger(__name__)
@@ -377,3 +378,85 @@ class SecretFindingUpdateSerializer(serializers.ModelSerializer):
             "is_false_positive",
             "false_positive_reason",
         ]
+
+
+class RepositoryWatchlistSerializer(serializers.ModelSerializer):
+    """Serializer for RepositoryWatchlist model."""
+
+    scan_interval_display = serializers.CharField(
+        source="get_scan_interval_display",
+        read_only=True,
+    )
+    added_by_email = serializers.EmailField(
+        source="added_by.email",
+        read_only=True,
+        allow_null=True,
+    )
+    last_scan_status = serializers.CharField(
+        source="last_scan.scan_status",
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = RepositoryWatchlist
+        fields = [
+            "id",
+            "repository_url",
+            "repository_owner",
+            "repository_name",
+            "repository_full_name",
+            "scan_interval",
+            "scan_interval_display",
+            "is_active",
+            "added_by_email",
+            "created_at",
+            "last_scanned_at",
+            "next_scan_at",
+            "last_scan",
+            "last_scan_status",
+            "total_scans",
+            "last_secrets_found",
+        ]
+        read_only_fields = [
+            "id",
+            "repository_owner",
+            "repository_name",
+            "repository_full_name",
+            "added_by_email",
+            "created_at",
+            "last_scanned_at",
+            "next_scan_at",
+            "last_scan",
+            "last_scan_status",
+            "total_scans",
+            "last_secrets_found",
+        ]
+
+    def validate_repository_url(self, value):
+        """Validate and parse GitHub repository URL."""
+        github_client = GitHubClient()
+        try:
+            owner, repo = github_client.parse_repo_url(value)
+            if not owner or not repo:
+                msg = "Invalid GitHub repository URL"
+                raise serializers.ValidationError(msg)
+        except (ValueError, GitHubClientError) as e:
+            raise serializers.ValidationError(str(e)) from e
+        else:
+            return value
+
+    def create(self, validated_data):
+        """Create watchlist entry and parse repository info."""
+        github_client = GitHubClient()
+        owner, repo = github_client.parse_repo_url(validated_data["repository_url"])
+
+        validated_data["repository_owner"] = owner
+        validated_data["repository_name"] = repo
+
+        # Set added_by from request context
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            validated_data["added_by"] = request.user
+
+        return super().create(validated_data)
