@@ -1,5 +1,8 @@
 """API views for scanner app."""
 
+import logging
+
+from django.conf import settings
 from django.db import transaction
 from rest_framework import mixins
 from rest_framework import status
@@ -10,6 +13,8 @@ from rest_framework.response import Response
 
 from secretshunter.scanner.models import RepositoryScan
 from secretshunter.scanner.models import SecretFinding
+from secretshunter.scanner.services import IssueCreationError
+from secretshunter.scanner.services import create_github_issue_for_scan
 from secretshunter.scanner.tasks import scan_repository_task
 
 from .serializers import IdempotentRepositoryScanSerializer
@@ -17,6 +22,8 @@ from .serializers import RepositoryScanListSerializer
 from .serializers import RepositoryScanSerializer
 from .serializers import SecretFindingSerializer
 from .serializers import SecretFindingUpdateSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class RepositoryScanViewSet(
@@ -272,6 +279,115 @@ class RepositoryScanViewSet(
 
         serializer = SecretFindingSerializer(findings, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="create-issue")
+    def create_issue(self, request, pk=None):
+        """Create a GitHub issue for scan findings.
+
+        This endpoint creates a GitHub issue in the scanned repository
+        summarizing all findings. It respects repository permissions,
+        checks if issues are enabled, and handles rate limits.
+
+        Requirements:
+        - Scan must be completed
+        - Scan must have findings (excluding false positives)
+        - Issue must not already exist for this scan
+        - GitHub token must be configured
+        - Issues must be enabled in the repository
+
+        Args:
+            request: HTTP request.
+            pk: Scan ID.
+
+        Returns:
+            Response with issue details or error message.
+
+        Example:
+            POST /api/scans/{id}/create-issue/
+
+            Response (success):
+            {
+                "success": true,
+                "issue_number": 42,
+                "issue_url": "https://github.com/owner/repo/issues/42",
+                "findings_count": 5,
+                "message": "Successfully created issue #42"
+            }
+
+            Response (error):
+            {
+                "success": false,
+                "error": "Issues are disabled for this repository"
+            }
+
+        """
+        scan = self.get_object()
+
+        # Validate scan status
+        if scan.scan_status != RepositoryScan.ScanStatus.COMPLETED:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Scan must be completed before creating an issue",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if scan has findings
+        findings_count = scan.findings.filter(is_false_positive=False).count()
+        if findings_count == 0:
+            return Response(
+                {
+                    "success": False,
+                    "error": "No findings to report (excluding false positives)",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create the issue
+        try:
+            github_token = getattr(settings, "GITHUB_TOKEN", None)
+            if not github_token:
+                return Response(
+                    {
+                        "success": False,
+                        "error": "GitHub token not configured",
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            result = create_github_issue_for_scan(scan, github_token)
+
+            return Response(
+                {
+                    "success": True,
+                    "issue_number": result["issue_number"],
+                    "issue_url": result["issue_url"],
+                    "findings_count": result["findings_count"],
+                    "message": f"Successfully created issue #{result['issue_number']}",
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except IssueCreationError as exc:
+            logger.warning("Failed to create issue for scan %s: %s", scan.id, exc)
+            return Response(
+                {
+                    "success": False,
+                    "error": str(exc),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception:
+            logger.exception("Unexpected error creating issue for scan %s", scan.id)
+            return Response(
+                {
+                    "success": False,
+                    "error": "An unexpected error occurred",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class SecretFindingViewSet(

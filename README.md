@@ -56,6 +56,7 @@ SecretsHunter is a security scanning tool that analyzes public GitHub repositori
 - `POST /api/scans/idempotent/` - Smart scanning with commit SHA deduplication
 - `GET /api/scans/` - List all scans
 - `GET /api/scans/{id}/` - Retrieve detailed scan results
+- `POST /api/scans/{id}/create-issue/` - Create a GitHub issue for scan findings
 - `PATCH /api/scans/{id}/mark_false_positive/` - Mark findings as false positives
 
 ### Features
@@ -66,5 +67,6 @@ SecretsHunter is a security scanning tool that analyzes public GitHub repositori
 - Context preservation for findings
 - File filtering (binaries, dependencies, build artifacts)
 - GitHub API rate limit handling
+- GitHub issue creation for findings
 - False positive management
 - Real-time scan status tracking

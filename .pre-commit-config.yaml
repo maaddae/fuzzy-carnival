@@ -20,7 +20,7 @@ repos:
       - id: check-case-conflict
       - id: check-docstring-first
       - id: detect-private-key
-        exclude: 'tests\.py$'  # Allow test files to contain dummy keys
+        exclude: '(tests\.py|tests/test_.*\.py)$'  # Allow test files to contain dummy keys
 
   - repo: https://github.com/adamchainz/django-upgrade
     rev: '1.29.1'
