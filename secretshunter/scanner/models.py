@@ -1,3 +1,7 @@
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -209,3 +213,95 @@ class SecretFinding(models.Model):
 
     def __str__(self):
         return f"{self.secret_type} in {self.file_path}:{self.line_number}"
+
+
+class RepositoryWatchlist(models.Model):
+    """Model to track repositories for periodic scanning."""
+
+    class ScanInterval(models.IntegerChoices):
+        HOURLY = 3600, _("Every Hour")
+        EVERY_6_HOURS = 21600, _("Every 6 Hours")
+        DAILY = 86400, _("Daily")
+        WEEKLY = 604800, _("Weekly")
+
+    # Repository information
+    repository_url = models.URLField(_("Repository URL"), max_length=500, unique=True)
+    repository_owner = models.CharField(_("Repository Owner"), max_length=255)
+    repository_name = models.CharField(_("Repository Name"), max_length=255)
+
+    # Watchlist settings
+    scan_interval = models.IntegerField(
+        _("Scan Interval (seconds)"),
+        choices=ScanInterval.choices,
+        default=ScanInterval.DAILY,
+        help_text=_("How often to scan this repository"),
+    )
+    is_active = models.BooleanField(
+        _("Is Active"),
+        default=True,
+        db_index=True,
+        help_text=_("Whether this repository should be scanned"),
+    )
+
+    # Tracking
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="watchlist_repositories",
+        verbose_name=_("Added By"),
+    )
+    created_at = models.DateTimeField(_("Created At"), auto_now_add=True)
+    last_scanned_at = models.DateTimeField(
+        _("Last Scanned At"),
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    next_scan_at = models.DateTimeField(
+        _("Next Scan At"),
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=_("When the next scan should occur"),
+    )
+    last_scan = models.ForeignKey(
+        "RepositoryScan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="watchlist_entries",
+        verbose_name=_("Last Scan"),
+    )
+
+    # Statistics
+    total_scans = models.IntegerField(_("Total Scans"), default=0)
+    last_secrets_found = models.IntegerField(_("Last Secrets Found"), default=0)
+
+    class Meta:
+        verbose_name = _("Repository Watchlist")
+        verbose_name_plural = _("Repository Watchlists")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["is_active", "next_scan_at"]),
+            models.Index(fields=["repository_owner", "repository_name"]),
+        ]
+
+    def __str__(self):
+        return f"{self.repository_owner}/{self.repository_name}"
+
+    def save(self, *args, **kwargs):
+        """Override save to set initial next_scan_at."""
+        # Set next_scan_at on creation if not already set
+        if not self.pk and not self.next_scan_at:
+            self.next_scan_at = datetime.now(tz=UTC) + timedelta(
+                seconds=self.scan_interval,
+            )
+
+        super().save(*args, **kwargs)
+
+    @property
+    def repository_full_name(self):
+        """Return the full repository name."""
+        return f"{self.repository_owner}/{self.repository_name}"

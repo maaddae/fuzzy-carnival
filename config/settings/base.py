@@ -347,7 +347,7 @@ CORS_URLS_REGEX = r"^/api/.*$"
 SPECTACULAR_SETTINGS = {
     "TITLE": "Secretshunter API",
     "DESCRIPTION": "Documentation of API endpoints of Secretshunter",
-    "VERSION": "0.3.0",
+    "VERSION": "0.4.0",
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
 }
