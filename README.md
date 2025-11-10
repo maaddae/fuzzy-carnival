@@ -156,10 +156,6 @@ curl -X PATCH http://localhost:8000/api/watchlist/{id}/ \
   -d '{"scan_interval": 3600, "is_active": true}'
 ```
 
-curl -X POST "http://localhost:8000/api/scans/{scan_id}/create-issue/" \
-  -H "Authorization: Token your_api_token"
-```
-
 ## Assumptions, Limitations, and Trade-offs
 
 ### **Assumptions**
